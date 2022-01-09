@@ -1,10 +1,12 @@
 # 准备环境
 source /etc/profile 
 export PS1="(chroot) ${PS1}"
+
 # 启用fyn的特殊选项
 echo "if you are fyn?[y/N]"
 read fyn
 clear
+
 # 建立efi目录
 mkdir -p /boot/efi /var/tmp/portage
 if [$fyn == "y" -o $fyn == "yes"]
@@ -17,10 +19,18 @@ else
     echo "tmpfs                   /var/tmp/portage        tmpfs           defaults,rw,nodev,nosuid,size=5G,noatime    0 0" >> /etc/fstab
 fi
 clear
+
 # 挂载所有分区
 mount -a
+
 # 更新镜像
+if [$fyn == "y" -n $fyn == "yes"]
+then
+    mirrorselect -i -o >> /mnt/gentoo/etc/portage/make.conf
+    emerge-websync
+fi
 emerge --sync
+
 # 建立notmpfs目录
 mkdir -p /var/tmp/notmpfs
 # 设置notmpfs目录
@@ -38,6 +48,7 @@ net-im/telegram-desktop         notmpfs.conf
 www-client/librewolf            notmpfs.conf
 EOF
 echo "PORTAGE_TMPDIR=\"/var/tmp/notmpfs\"" > /etc/portage/env/notmpfs.conf
+
 # 选择init
 cat <<EOF
 Which init would you like to use:
@@ -45,6 +56,7 @@ Which init would you like to use:
 EOF
 echo "Enter the nember before you choose(openrc is default):"
 read init
+
 # 选择桌面环境
 cat <<EOF
 Which desktop would you like to use:
@@ -53,6 +65,7 @@ PS: if you want to use both gnome and kde, please choose 2
 EOF
 echo "Enter the nember before you choose(plasma is default):"
 read desktop
+
 # 设置配置文件
 if [${init} == "1" -o ${init} == ""]
 then
@@ -121,36 +134,64 @@ then
     bash fyn/thinlto.sh
     clear
 fi
+
+# 尝试自动更新系统
 emerge --verbose --update --deep --newuse @world --autounmask-write
 yes | etc-update --automode -3
 USE="-harfbuzz" emerge --oneshot freetype
 emerge --verbose --update --deep --newuse @world
 emerge --depclean 
 emerge -uvDN @world
+emerge @preserved-rebuild
+perl-cleaner --all
+emerge -uvDN --with-bdeps=y @world
+
+# 时区和语言环境
 echo "Asia/Shanghai" >> /etc/timezone
 emerge --config sys-libs/timezone-data
-echo "C.UTF8 UTF-8" >> /etc/locale.gen
-echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
-echo "zh_CN.UTF-8 UTF-8" >> /etc/locale.gen
-echo "zh_CN.GBK GBK" >> /etc/locale.gen
+cat>/etc/locale.gen<<EOF
+C.UTF8 UTF-8
+en_US.UTF-8 UTF-8
+zh_CN.UTF-8 UTF-8
+zh_CN.GBK GBK
+EOF
 locale-gen
 eselect locale set 'zh_CN.utf8'
-emerge linux-tkg-sources 
+
+# 配置内核
+if [$fyn == "y" -o $fyn == "yes"]
+then
+    bash fyn/kernel.sh
+else
+    emerge gentoo-sources genkernel
+    genkernel all
+fi
+emerge sys-kernel/linux-firmware 
+
+# 配置系统
 emerge sudo 
-sed -i "s/# %wheel ALL=(ALL) /%wheel ALL=(ALL) /" /etc/sudoers
-eselect kernel set 1
-cd /usr/src/linux
-cp /home/.config /usr/src/linux
-make olddefconfig
-make -j7 && make modules_install && make install
-emerge sys-kernel/linux-firmware
-echo "hostname=gentoo-fyn" > /etc/conf.d/hostname
-emerge cronie
-rm -r /root
-cp -r /home/root /root
+sed -i "s/# %wheel ALL=(ALL)/%wheel ALL=(ALL)/" /etc/sudoers
+echo "enter hostname" && read hostname
+echo "hostname=${hostname}" > /etc/conf.d/hostname
 emerge sys-boot/grub
-grub-install --target=x86_64-efi --efi-directory=/boot --removable  --compress=zstd --bootloader-id=Gentoo-fyn --core-compress=auto
+if [$fyn == "y" -o $fyn == "yes"]
+then
+    rm -r /root
+    cp -r /home/root /root
+    grub-install --target=x86_64-efi --efi-directory=/boot --removable --bootloader-id=Gentoo-fyn
+else
+    grub-install --target=x86_64-efi --efi-directory=/boot --removable  --bootloader-id=Gentoo
 grub-mkconfig -o /boot/grub/grub.cfg
-emerge --ask --noreplace net-misc/netifrc
-nano /etc/conf.d/net
-emerge zsh
+if [${init} == "1" -o ${init} == ""]
+then
+    emerge cronie
+    rc-update add cronie
+    emerge --ask --noreplace net-misc/netifrc
+    nano /etc/conf.d/net
+elif [${init} == "2"]
+then 
+    sed -i 's/\# GRUB_CMDLINE_LINUX=\"init=\/usr\/lib\/systemd\/systemd\"/GRUB_CMDLINE_LINUX=\"init=\/usr\/lib\/systemd\/systemd\"/g' /etc/default/grub
+    ln -sf /proc/self/mounts /etc/mtab
+    systemd-machine-id-setup
+    emerge networkmanager && systemctl enable NetworkManager
+fi
