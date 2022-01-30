@@ -110,9 +110,9 @@ fi
 clear
 
 # 创建用户并设置密码
+USE="-pam" emerge -1 sysapps/shadow
 echo "Set the root password"
 passwd root
-USE="-pam" emerge -1 sys-apps/shadow
 if [$fyn == "y" -o $fyn == "yes"]
 then
     emerge zsh
@@ -147,7 +147,9 @@ perl-cleaner --all
 emerge -uvDN --with-bdeps=y @world
 
 # 时区和语言环境
-echo "Asia/Shanghai" >> /etc/timezone
+echo "Enter your timezone:"
+read timezone
+echo "${timezone}" >> /etc/timezone
 emerge --config sys-libs/timezone-data
 cat>/etc/locale.gen<<EOF
 C.UTF8 UTF-8
